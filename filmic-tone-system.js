@@ -26,9 +26,9 @@ class FilmicToneSystem {
         // Track render state changes to avoid debug spam
         this.lastRenderState = null;
         
-        // Settings (disabled by default)
+        // Settings (enabled by default for cinematic look)
         this.settings = {
-            enabled: false, // Disabled by default
+            enabled: true, // Enabled for cinematic color grading
             
             // Tone Mapping
             toneMapping: 'linear', // 'linear', 'aces', 'reinhard', 'uncharted2'

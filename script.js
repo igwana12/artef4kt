@@ -124,7 +124,7 @@ class FerrofluidVisualizer {
         this.animationId = null;
         
         // Audio input source management
-        this.audioInputSource = 'file'; // 'file', 'input'
+        this.audioInputSource = 'input'; // 'file', 'input'
         this.microphoneStream = null;
         this.lineStream = null;
         this.currentInputSource = null;
@@ -280,10 +280,10 @@ class FerrofluidVisualizer {
         this.gridCellAnimator = null;
         this.lightGroup = null;        // Floating blob system
         this.floatingBlobs = [];
-        this.maxFloatingBlobs = 12;
-        this.blobSpawnThreshold = 0.5; // Much higher threshold - only spawn during intense music activity
+        this.maxFloatingBlobs = 40;
+        this.blobSpawnThreshold = 0.12; // Low threshold — spawn particles easily from voice/music
         this.lastSpawnTime = 0;
-        this.spawnCooldown = 400; // Longer cooldown to prevent over-spawning at music start         
+        this.spawnCooldown = 120; // Fast spawning for particulate feel         
         //  BPM Detection - Enhanced system
         this.bpmDetector = {
             peaks: [],
@@ -344,11 +344,11 @@ class FerrofluidVisualizer {
             mouseWorldPosition: new THREE.Vector3(),
             lastMouseUpdate: 0,            // Ripple wave system - enhanced for more forceful, slower liquid-like behavior
             waves: [],
-            maxWaves: 3,
-            waveAmplitude: 0.4,      // Increased from 0.8 - more forceful ripples
-            waveFrequency: 2.0,      // Further decreased from 2.5 - even wider wave crests for slower liquid motion
-            waveDecay: 0.8,          // Further decreased from 1.2 - much slower fade for persistent liquid waves
-            waveSpeed: 2.5           // Further decreased from 4.0 - much slower propagation like thick honey
+            maxWaves: 6,             // More simultaneous waves for richer voice-driven deformation
+            waveAmplitude: 0.5,      // Strong ripples
+            waveFrequency: 2.0,      // Wide wave crests for slow liquid motion
+            waveDecay: 0.6,          // Slow fade for persistent liquid waves
+            waveSpeed: 2.0           // Slow propagation like thick honey
         };
         
         // Initialize skip flag for performance optimization
@@ -426,16 +426,37 @@ class FerrofluidVisualizer {
         // Initialize shockwave system
         this.shockwaveSystem = new ShockwaveSystem(this);
 
+        // Initialize Cosmic Entity system (Claude's face)
+        this.cosmicEntity = new CosmicEntitySystem(this);
+        console.log('⚡ Cosmic Entity ready — press C to toggle');
+
+        // Initialize LiquidBlob marching cubes system — activates at high melt for amorphous shapes
+        if (typeof LiquidBlob !== 'undefined') {
+            this.liquidBlob = new LiquidBlob(this);
+            this.liquidBlob.activate(); // Always active — crossfade is handled by melt-driven opacity
+            // Share environment map with the MC material for matching reflections
+            if (this.liquidBlob.mcMaterial && this.ferrofluid && this.ferrofluid.material.envMap) {
+                this.liquidBlob.mcMaterial.envMap = this.ferrofluid.material.envMap;
+            }
+            console.log('🫧 LiquidBlob marching cubes ready — melt-driven crossfade active');
+        }
+
+        // ═══ ATMOSPHERE + LIGHTNING — disabled (geometric shells looked bad) ═══
+        // TODO: Replace with particle-based volumetric clouds + thick glowing bolt geometry
+        // this._initAtmosphereLayer();
+        // this._initLightningLayer();
+
         // Update loading progress
         window.loadingManager.updateProgress(70);
 
-        // Initialize blob shader system for enhanced performance (temporarily disabled for debugging)
+        // Initialize blob shader system for enhanced GPU-accelerated rendering
         try {
-            // this.gpuParticleSystem = new BlobShaderSystem(this);
-            console.log('Artefact Shader System disabled - using standard materials');
-            this.gpuParticleSystem = null;
+            this.gpuParticleSystem = new BlobShaderSystem(this);
+            console.log('Artefact Shader System initialized successfully');
         } catch (error) {
             console.error('Failed to init Artefact Shader System:', error);
+            console.error('Stack trace:', error.stack);
+            console.log('Falling back to standard materials');
             this.gpuParticleSystem = null;
         }
 
@@ -655,7 +676,7 @@ class FerrofluidVisualizer {
             });
         }
 
-        // Create material with metallic, reflective properties
+        // Create material with metallic, reflective properties + iridescent Fresnel edges
         const material = new THREE.MeshPhysicalMaterial({
             color: 0x222222,
             metalness: 0.9,
@@ -666,14 +687,21 @@ class FerrofluidVisualizer {
             envMapIntensity: 1.5
         });
 
+        // Iridescent Fresnel edges — disabled (shader injection broke rendering in r128)
+        // TODO: Implement via separate iridescent shell mesh instead of onBeforeCompile
+        this._ferrofluidMaterial = material;
+
         this.ferrofluid = new THREE.Mesh(geometry, material);
         this.ferrofluid.castShadow = true;
         this.ferrofluid.receiveShadow = true;
         this.ferrofluid.position.set(0, 0, 0);
+        this.ferrofluid.renderOrder = 0; // Draw first — establishes depth buffer
         this.scene.add(this.ferrofluid);
 
+        // Second blob removed — single blob is the primary visual
+
         // Create inner black sphere to hide seams when the outer sphere deforms
-        const innerGeometry = new THREE.SphereGeometry(2.5, 64, 64); // Much smaller to avoid showing through deformations
+        const innerGeometry = new THREE.SphereGeometry(2.5, 64, 64); // Inner core to hide seams during deformations
         const innerMaterial = new THREE.MeshBasicMaterial({
             color: 0x000000, // Pure black
             side: THREE.BackSide // Only render the inside faces
@@ -681,6 +709,7 @@ class FerrofluidVisualizer {
         
         this.ferrofluidInner = new THREE.Mesh(innerGeometry, innerMaterial);
         this.ferrofluidInner.position.set(0, 0, 0);
+        this.ferrofluidInner.renderOrder = 0;
         this.scene.add(this.ferrofluidInner);
 
         // Store original inner core scale for adaptive sizing
@@ -698,7 +727,16 @@ class FerrofluidVisualizer {
         // Animation properties
         this.baseRotation = { x: 0, y: 0, z: 0 };
         this.fluidTime = 0;
-        this.morphIntensity = 0.3; // Base morphing intensity
+        this.morphIntensity = 0.5; // Higher morph for more dynamic/bubbly center
+
+        // ═══ MELT ACCUMULATOR — sustained voice input makes the blob progressively more liquidy ═══
+        // Builds while audio is active, decays slowly when silent.
+        // 0 = calm sphere, 1 = fully melted splash state
+        this.meltLevel = 0;
+        this.meltTarget = 0;
+        this.meltBuildRate = 0.15;   // How fast melt builds (per second) — slow, sustained buildup
+        this.meltDecayRate = 0.08;   // How fast melt decays (per second) — very slow recongealment
+        this.meltThreshold = 0.1;    // Minimum audio energy to start building melt
 
         // Create floating blob material (solid like main ferrofluid)
         this.floatingBlobMaterial = new THREE.MeshPhysicalMaterial({
@@ -2582,7 +2620,7 @@ class FerrofluidVisualizer {
             this.stopUltraFastAudioPolling();
             
             // Set audio input source to file
-            this.audioInputSource = 'file';
+            this.audioInputSource = 'input';
             
             // Stop input audio if active (file overrides input)
             if (this.activeAudioSource === 'input') {
@@ -2846,7 +2884,7 @@ class FerrofluidVisualizer {
     }
     
     async loadDefaultAudio() {
-        const defaultFileName = 'bogdan-rosu-yfflon.mp3';
+        const defaultFileName = null; return; // JARVIS: no default song
         const relativePath = `mp3/${defaultFileName}`;
         const resolvedPath = this.resolveFilePath(relativePath);
         console.log('Loading default audio:', resolvedPath);
@@ -3407,9 +3445,9 @@ class FerrofluidVisualizer {
         this.bassIntensity = bassCount > 0 ? (bassSum / bassCount / 255) * this.sensitivity : 0;
         this.midIntensity = midCount > 0 ? (midSum / midCount / 255) * this.sensitivity : 0;
         this.highIntensity = highCount > 0 ? (highSum / highCount / 255) * this.sensitivity : 0;        // Apply frequency-specific weighting for better musical response
-        this.bassIntensity *= 0.8;  // Increased bass sensitivity for stronger influence
-        this.midIntensity *= 1.2;   // Slight mid boost
-        this.highIntensity *= 1.1;  // Boost high sensitivity for more dramatic spikes
+        this.bassIntensity *= (this._bassMultOverride !== undefined ? this._bassMultOverride : 0.8);
+        this.midIntensity *= (this._midMultOverride !== undefined ? this._midMultOverride : 1.2);
+        this.highIntensity *= (this._highMultOverride !== undefined ? this._highMultOverride : 1.1);
         
         // Update frequency level indicators in UI
         this.updateFrequencyIndicators();
@@ -3444,6 +3482,262 @@ class FerrofluidVisualizer {
             Math.sin(x * 0.4 + 2.7) * Math.cos(y * 0.4 + 1.9) * Math.sin(z * 0.4 + 4.2) * 0.25
         ) / 1.75;    }
     
+    // ═══════════════════════════════════════════════════════════
+    // ATMOSPHERE — Nebula cloud shells with voice-reactive churning
+    // Cartoonishly disproportionate clouds around the ferrofluid planet
+    // ═══════════════════════════════════════════════════════════
+
+    _initAtmosphereLayer() {
+        this._atmoGroup = new THREE.Group();
+        this.scene.add(this._atmoGroup);
+
+        this._cloudShells = [];
+        // Scaled to main blob radius (~3.0) — clouds at 3.5-4.5 radius
+        // Cartoonishly thick, bumpy, glowing
+        const cloudConfigs = [
+            { radius: 3.6, opacity: 0.06, color: 0x1a0a22, emissive: 0x140820, speed: 0.06, noiseScale: 0.5 },
+            { radius: 4.0, opacity: 0.05, color: 0x0f1520, emissive: 0x0a1018, speed: -0.04, noiseScale: 0.6 },
+            { radius: 4.5, opacity: 0.035, color: 0x0a0f18, emissive: 0x060a10, speed: 0.03, noiseScale: 0.7 },
+        ];
+
+        for (const cfg of cloudConfigs) {
+            const geo = new THREE.SphereGeometry(cfg.radius, 48, 48);
+            const mat = new THREE.MeshStandardMaterial({
+                color: cfg.color,
+                emissive: cfg.emissive,
+                emissiveIntensity: 0.4,
+                transparent: true,
+                opacity: cfg.opacity,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+                roughness: 1.0,
+                metalness: 0.0,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            this._atmoGroup.add(mesh);
+            this._cloudShells.push({
+                mesh, mat, geo,
+                origPositions: geo.attributes.position.array.slice(),
+                vertexCount: geo.attributes.position.array.length / 3,
+                speed: cfg.speed,
+                noiseScale: cfg.noiseScale,
+                baseOpacity: cfg.opacity,
+            });
+        }
+
+        // Thunder flash light inside the atmosphere
+        this._thunderLight = new THREE.PointLight(0x8866ff, 0, 12.0);
+        this._thunderLight.position.set(0, 0, 0);
+        this.scene.add(this._thunderLight);
+        this._thunderIntensity = 0;
+        this._thunderCooldown = 0;
+
+        console.log('🌩️ Atmosphere layer initialized (3 cloud shells + thunder)');
+    }
+
+    _updateAtmosphereLayer(dt, time) {
+        if (!this._cloudShells) return;
+
+        const audioInfluence = Math.max(0.05, this.bassIntensity + this.midIntensity + this.highIntensity);
+        const melt = this.meltLevel || 0;
+
+        // Track ferrofluid position so clouds follow the blob
+        if (this.ferrofluid) {
+            this._atmoGroup.position.copy(this.ferrofluid.position);
+        }
+
+        for (const shell of this._cloudShells) {
+            const positions = shell.mesh.geometry.attributes.position.array;
+            const orig = shell.origPositions;
+
+            // Rotate each shell slowly — faster when excited
+            const rotSpeed = shell.speed * (1.0 + audioInfluence * 2.0 + melt * 1.5);
+            shell.mesh.rotation.y += rotSpeed * dt;
+            shell.mesh.rotation.x += rotSpeed * 0.3 * dt;
+
+            // Deform clouds — turbulent churning, more violent when excited
+            for (let i = 0; i < shell.vertexCount; i++) {
+                const ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
+                const ox = orig[ix], oy = orig[iy], oz = orig[iz];
+                const len = Math.sqrt(ox*ox + oy*oy + oz*oz) || 1;
+                const nx = ox/len, ny = oy/len, nz = oz/len;
+
+                // Cloud turbulence — two octaves
+                const turb1 = this.noise3D(
+                    ox * shell.noiseScale + time * 0.2,
+                    oy * shell.noiseScale + time * 0.15,
+                    oz * shell.noiseScale + time * 0.25
+                ) * (0.3 + audioInfluence * 0.5 + melt * 0.4);
+
+                const turb2 = this.noise3D(
+                    ox * shell.noiseScale * 2.0 + time * 0.35 + 50,
+                    oy * shell.noiseScale * 2.0 + time * 0.3,
+                    oz * shell.noiseScale * 2.0 + time * 0.4
+                ) * (0.15 + audioInfluence * 0.25);
+
+                const disp = turb1 + turb2;
+                positions[ix] = ox + nx * disp;
+                positions[iy] = oy + ny * disp;
+                positions[iz] = oz + nz * disp;
+            }
+
+            shell.mesh.geometry.attributes.position.needsUpdate = true;
+
+            // Opacity pulses with audio — atmosphere comes alive with voice
+            shell.mat.opacity = shell.baseOpacity + audioInfluence * 0.08 + melt * 0.04;
+            shell.mat.emissiveIntensity = 0.3 + audioInfluence * 0.6 + melt * 0.3;
+        }
+
+        // ═══ THUNDER FLASHES ═══
+        this._thunderCooldown -= dt;
+        // Trigger on onsets or randomly — more frequent when excited
+        const thunderChance = 0.002 + audioInfluence * 0.01 + melt * 0.008;
+        if (this._thunderCooldown <= 0 && Math.random() < thunderChance) {
+            this._thunderIntensity = 2.0 + Math.random() * 3.0;
+            this._thunderCooldown = 0.5 + Math.random() * 1.5;
+            // Random position inside atmosphere shell
+            const ta = Math.random() * Math.PI * 2;
+            const tp = Math.acos(2 * Math.random() - 1);
+            const tr = 2.0 + Math.random() * 2.0;
+            this._thunderLight.position.set(
+                tr * Math.sin(tp) * Math.cos(ta),
+                tr * Math.sin(tp) * Math.sin(ta),
+                tr * Math.cos(tp)
+            );
+            const thunderColors = [0x8855ff, 0x44bbdd, 0xddaa44, 0xccccff, 0xff66aa];
+            this._thunderLight.color.setHex(thunderColors[Math.floor(Math.random() * thunderColors.length)]);
+        }
+        this._thunderIntensity *= (1.0 - 6.0 * dt);
+        if (this._thunderIntensity < 0.01) this._thunderIntensity = 0;
+        this._thunderLight.intensity = this._thunderIntensity;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // LIGHTNING — Electric arcs crackling through the atmosphere
+    // ═══════════════════════════════════════════════════════════
+
+    _initLightningLayer() {
+        this._bolts = [];
+        this._boltGroup = new THREE.Group();
+        this.scene.add(this._boltGroup);
+
+        const boltColors = [
+            0x7744ff, // purple
+            0x44ddff, // cyan
+            0xffaa33, // amber
+            0xff44aa, // pink
+            0x44ff88, // green
+            0xddddff, // white-blue
+            0xffdd44, // gold
+            0xaa44ff, // violet
+        ];
+
+        // 8 persistent lightning bolt line objects
+        for (let b = 0; b < 8; b++) {
+            const segments = 24;
+            const points = [];
+            for (let s = 0; s <= segments; s++) {
+                points.push(new THREE.Vector3(0, 0, 0));
+            }
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({
+                color: boltColors[b % boltColors.length],
+                transparent: true,
+                opacity: 0,
+                linewidth: 1,
+            });
+            const line = new THREE.Line(geometry, material);
+            this._boltGroup.add(line);
+            this._bolts.push({
+                line, geometry, material,
+                segments,
+                active: false,
+                life: 0,
+                maxLife: 0.25 + Math.random() * 0.15,
+                startTheta: 0, startPhi: 0,
+                endTheta: 0, endPhi: 0,
+                color: boltColors[b % boltColors.length],
+            });
+        }
+        this._boltTimer = 0;
+        console.log('⚡ Lightning layer initialized (8 bolt channels)');
+    }
+
+    _updateLightningLayer(dt, time) {
+        if (!this._bolts) return;
+
+        const audioInfluence = Math.max(0.05, this.bassIntensity + this.midIntensity + this.highIntensity);
+        const melt = this.meltLevel || 0;
+
+        // Track ferrofluid position
+        if (this.ferrofluid) {
+            this._boltGroup.position.copy(this.ferrofluid.position);
+        }
+
+        this._boltTimer -= dt;
+
+        // Spawn rate: slower when idle, rapid when excited
+        const spawnInterval = Math.max(0.08, 0.6 - audioInfluence * 0.4 - melt * 0.2);
+        if (this._boltTimer <= 0) {
+            this._boltTimer = spawnInterval + Math.random() * spawnInterval * 0.5;
+            const inactive = this._bolts.filter(b => !b.active);
+            if (inactive.length > 0) {
+                const bolt = inactive[Math.floor(Math.random() * inactive.length)];
+                bolt.active = true;
+                bolt.life = bolt.maxLife;
+                // Random start/end points on the atmosphere shell
+                bolt.startTheta = Math.random() * Math.PI * 2;
+                bolt.startPhi = Math.acos(2 * Math.random() - 1);
+                // End point: nearby for short arcs, far for dramatic ones
+                const arcSpread = 0.8 + audioInfluence * 1.5 + melt * 1.0;
+                bolt.endTheta = bolt.startTheta + (Math.random() - 0.5) * arcSpread;
+                bolt.endPhi = bolt.startPhi + (Math.random() - 0.5) * arcSpread * 0.7;
+            }
+        }
+
+        // Update active bolts
+        for (const bolt of this._bolts) {
+            if (!bolt.active) {
+                bolt.material.opacity = 0;
+                continue;
+            }
+
+            bolt.life -= dt;
+            if (bolt.life <= 0) {
+                bolt.active = false;
+                bolt.material.opacity = 0;
+                continue;
+            }
+
+            // Flash then decay
+            const lifeFrac = bolt.life / bolt.maxLife;
+            bolt.material.opacity = lifeFrac * (0.2 + audioInfluence * 0.5 + melt * 0.3);
+
+            // Generate jagged path between two atmosphere points
+            const r = 3.8 + Math.random() * 0.8; // At atmosphere shell radius
+            const positions = bolt.geometry.attributes.position.array;
+            for (let s = 0; s <= bolt.segments; s++) {
+                const frac = s / bolt.segments;
+                const theta = bolt.startTheta + (bolt.endTheta - bolt.startTheta) * frac;
+                const phi = bolt.startPhi + (bolt.endPhi - bolt.startPhi) * frac;
+                let px = r * Math.sin(phi) * Math.cos(theta);
+                let py = r * Math.sin(phi) * Math.sin(theta);
+                let pz = r * Math.cos(phi);
+                // Jagged displacement — more violent when excited
+                if (s > 0 && s < bolt.segments) {
+                    const jag = 0.2 + audioInfluence * 0.3 + melt * 0.2;
+                    px += (Math.random() - 0.5) * jag;
+                    py += (Math.random() - 0.5) * jag;
+                    pz += (Math.random() - 0.5) * jag;
+                }
+                positions[s * 3] = px;
+                positions[s * 3 + 1] = py;
+                positions[s * 3 + 2] = pz;
+            }
+            bolt.geometry.attributes.position.needsUpdate = true;
+        }
+    }
+
     updateFerrofluid() {
         if (!this.ferrofluid) return;
         
@@ -3459,6 +3753,19 @@ class FerrofluidVisualizer {
         // Calculate audio influence (default to subtle movement when no music)
         const audioInfluence = Math.max(0.15, this.bassIntensity + this.midIntensity + this.highIntensity);
         const time = this.fluidTime;
+
+        // ═══ MELT ACCUMULATOR UPDATE ═══
+        // Builds while voice/audio is active, decays slowly when silent
+        if (audioInfluence > this.meltThreshold && this.isPlaying) {
+            // Build melt — faster when audio is louder
+            this.meltTarget = Math.min(1.0, this.meltTarget + this.meltBuildRate * deltaTime * (0.5 + audioInfluence));
+        } else {
+            // Decay melt — slow recongealment back to sphere
+            this.meltTarget = Math.max(0, this.meltTarget - this.meltDecayRate * deltaTime);
+        }
+        // Smooth interpolation for organic feel
+        this.meltLevel += (this.meltTarget - this.meltLevel) * Math.min(1, 3.0 * deltaTime);
+        const melt = this.meltLevel;
         
         // Create dynamic blob centers that move around the surface
         const blobCenters = this.generateDynamicBlobCenters(time);
@@ -3474,12 +3781,14 @@ class FerrofluidVisualizer {
             const vertexPos = new THREE.Vector3(x, y, z);
             const distance = vertexPos.length();
             
-            // Base organic movement using noise
+            // Base organic movement using noise — amplified by melt level
             const noiseOffset = this.noiseOffsets[vertexIndex];
-            const noiseX = x + time * noiseOffset.speed;
-            const noiseY = y + time * noiseOffset.speed * 0.8;
-            const noiseZ = z + time * noiseOffset.speed * 1.2;
-            const baseNoise = this.noise3D(noiseX, noiseY, noiseZ) * 0.5; // Increased from 0.3 for more visible ripples
+            const meltNoiseBoost = 1.0 + melt * 2.5; // At full melt, noise is 3.5x stronger
+            const meltSpeedBoost = 1.0 + melt * 1.5; // Churning speeds up as it melts
+            const noiseX = x + time * noiseOffset.speed * meltSpeedBoost;
+            const noiseY = y + time * noiseOffset.speed * 0.8 * meltSpeedBoost;
+            const noiseZ = z + time * noiseOffset.speed * 1.2 * meltSpeedBoost;
+            const baseNoise = this.noise3D(noiseX, noiseY, noiseZ) * 0.5 * meltNoiseBoost;
               // Calculate influence from each dynamic blob center (optimized)
             let totalBlobInfluence = 0;
             
@@ -3506,12 +3815,13 @@ class FerrofluidVisualizer {
             // Apply deformation along surface normal
             const normal = vertexPos.clone().normalize();
             
-            // Add flowing movement for liquid-like behavior
+            // Add flowing movement for liquid-like behavior — dramatically more fluid as melt builds
+            const flowMag = (0.08 + melt * 0.25) * audioInfluence;
             const flowDirection = new THREE.Vector3(
-                this.noise3D(x * 0.1 + time * 0.3, y * 0.1, z * 0.1),
-                this.noise3D(x * 0.1, y * 0.1 + time * 0.2, z * 0.1),
-                this.noise3D(x * 0.1, y * 0.1, z * 0.1 + time * 0.4)
-            ).normalize().multiplyScalar(0.08 * audioInfluence);
+                this.noise3D(x * 0.1 + time * 0.3 * meltSpeedBoost, y * 0.1, z * 0.1),
+                this.noise3D(x * 0.1, y * 0.1 + time * 0.2 * meltSpeedBoost, z * 0.1),
+                this.noise3D(x * 0.1, y * 0.1, z * 0.1 + time * 0.4 * meltSpeedBoost)
+            ).normalize().multiplyScalar(flowMag);
               const finalNormal = normal.clone().add(flowDirection).normalize();
               // === ANOMALY DEFORMATION EFFECTS ===
             let anomalyDeformation = 0;
@@ -3590,8 +3900,8 @@ class FerrofluidVisualizer {
                 this.targetPositions[i] = x + finalNormal.x * combinedDeformation;
                 this.targetPositions[i + 1] = y + finalNormal.y * combinedDeformation;
                 this.targetPositions[i + 2] = z + finalNormal.z * combinedDeformation;            } else {
-                // When paused or no audio, target the original sphere shape with mouse ripples
-                const combinedDeformation = baseNoise * 0.8 + mouseRippleDeformation; // Increased from 0.3 for more visible ripples
+                // When paused or no audio, target near-smooth sphere (calm state) + any voice/mouse ripples
+                const combinedDeformation = baseNoise * 0.15 + mouseRippleDeformation; // Very low base noise for calm idle
                 this.targetPositions[i] = x + finalNormal.x * combinedDeformation;
                 this.targetPositions[i + 1] = y + finalNormal.y * combinedDeformation;
                 this.targetPositions[i + 2] = z + finalNormal.z * combinedDeformation;
@@ -3603,12 +3913,14 @@ class FerrofluidVisualizer {
         
         // Apply smoothing to all vertices after all forces are calculated
         for (let i = 0; i < positions.length; i += 3) {
-            // Adaptive damping: faster return to original shape when paused
+            // Adaptive damping — gets looser (more liquid) as melt builds
             let dampingFactor;
             if (this.isPlaying && audioInfluence > 0.15) {
-                dampingFactor = 0.12 + audioInfluence * 0.08; // Responsive when music is playing
+                // More responsive at higher melt — the surface becomes more liquid
+                dampingFactor = (0.12 + audioInfluence * 0.08) * (1.0 + melt * 1.5);
             } else {
-                dampingFactor = 0.06; // Slower, smoother return to original shape when paused
+                // When recongealing, damping decreases as melt drains — slow viscous return
+                dampingFactor = 0.06 * (1.0 + melt * 0.5);
             }
             
             this.currentPositions[i] += (this.targetPositions[i] - this.currentPositions[i]) * dampingFactor;
@@ -3630,6 +3942,7 @@ class FerrofluidVisualizer {
         this.ferrofluid.rotation.z = Math.cos(time * 0.2) * 0.05 + this.highIntensity * 0.1;
         
         // Enhanced floating movement with audio reactivity
+        // Gentle floating movement
         const floatIntensity = 0.3 + audioInfluence * 0.5;
         this.ferrofluid.position.y = Math.sin(time * 0.4) * floatIntensity;
         this.ferrofluid.position.x = Math.cos(time * 0.35) * (floatIntensity * 0.7);
@@ -3684,8 +3997,9 @@ class FerrofluidVisualizer {
             }
         }
           // === MID PROTRUSIONS: Moderate height, medium width ===
+        const meltMidBoost = 1.0 + this.meltLevel * 1.5; // Mid protrusions grow into thick tendrils as melt builds
         if (this.midIntensity > 0.04) { // Very low threshold for better layering with other frequencies
-            const numMidBlobs = Math.floor(2 + this.midIntensity * 4);
+            const numMidBlobs = Math.floor((2 + this.midIntensity * 4) * meltMidBoost);
             for (let i = 0; i < numMidBlobs; i++) {
                 // Add randomness to prevent symmetric patterns
                 const randomAngleOffset1 = (Math.random() - 0.5) * 2.5; // ±1.25 radian variation
@@ -3707,16 +4021,18 @@ class FerrofluidVisualizer {
                 
                 blobCenters.push({
                     position: position,
-                    radius: (0.8 + this.midIntensity * 0.6) * randomSizeFactor, // REDUCED: Much smaller radius for mid-range protrusions
-                    intensity: Math.pow(this.midIntensity, 1.1), // Slightly steeper curve
-                    strength: (2.2 + this.midIntensity * 2.5) * randomStrengthFactor, // Varied height
+                    radius: (0.8 + this.midIntensity * 0.6 + this.meltLevel * 0.4) * randomSizeFactor, // Wider protrusions as melt builds (thicker tendrils)
+                    intensity: Math.pow(this.midIntensity, 1.1),
+                    strength: (2.2 + this.midIntensity * 2.5) * randomStrengthFactor * meltMidBoost, // Taller as melt builds
                     type: 'mid',
                     animationSpeed: 0.5 // Medium animation speed
                 });
             }
         }        // === HIGH SPIKES: ULTRA-TALL, razor-sharp needle-like protrusions ===
+        // Melt amplifies spike count and intensity — the more melted, the more chaotic the surface
+        const meltSpikeBoost = 1.0 + this.meltLevel * 2.0; // Up to 3x more spikes when fully melted
         if (this.highIntensity > 0.02) { // Keep low threshold for high responsiveness
-            const numHighBlobs = Math.floor(8 + this.highIntensity * 20); // More spikes possible
+            const numHighBlobs = Math.floor((8 + this.highIntensity * 20) * meltSpikeBoost);
             for (let i = 0; i < numHighBlobs; i++) {
                 // Create truly uniform distribution across sphere surface
                 // Use proper spherical coordinates for uniform distribution
@@ -3768,7 +4084,7 @@ class FerrofluidVisualizer {
                     position: position,
                     radius: baseRadius * radiusVariation, // Varied thickness based on spike type
                     intensity: Math.pow(this.highIntensity, 3.2), // More aggressive power curve
-                    strength: (10.0 + this.highIntensity * 22.0) * strengthMultiplier * randomStrengthFactor, // Increased height range for taller high frequency spikes
+                    strength: (10.0 + this.highIntensity * 22.0) * strengthMultiplier * randomStrengthFactor * meltSpikeBoost, // Spikes grow taller as melt builds
                     type: 'high',
                     animationSpeed: 1.0 // Normal speed for responsive highs
                 });
@@ -3785,29 +4101,30 @@ createFloatingBlob(spawnPosition, intensity, type) {
         
         // Enhanced blob size variation with different "personalities"
         const blobPersonality = Math.random();
-        let baseSize, growthPotential, growthRate;        if (blobPersonality < 0.6) {
-            // Small, agile blobs (60%) - minimal growth to prevent performance issues
-            baseSize = 0.08 + Math.random() * 0.08; // 0.08-0.16
-            growthPotential = 1.01 + Math.random() * 0.04; // Can grow 1.01x-1.05x (very limited)
-            growthRate = 0.5 + Math.random() * 0.3; // Moderate growth speed
+        let baseSize, growthPotential, growthRate;        if (blobPersonality < 0.5) {
+            // Tiny bubbles (50%) — the particulate feel
+            baseSize = 0.03 + Math.random() * 0.05; // 0.03-0.08
+            growthPotential = 1.0; // No growth
+            growthRate = 0;
         } else if (blobPersonality < 0.8) {
-            // Medium blobs (20%) - limited growth
-            baseSize = 0.12 + Math.random() * 0.10; // 0.12-0.22
-            growthPotential = 1.03 + Math.random() * 0.07; // Can grow 1.03x-1.10x (reduced)
-            growthRate = 0.3 + Math.random() * 0.4; // Slower growth speed
+            // Small droplets (30%) — bubbly
+            baseSize = 0.06 + Math.random() * 0.06; // 0.06-0.12
+            growthPotential = 1.02 + Math.random() * 0.03; // Barely grows
+            growthRate = 0.4 + Math.random() * 0.3;
         } else if (blobPersonality < 0.95) {
-            // Large, slow blobs (15%) - moderate growth
-            baseSize = 0.16 + Math.random() * 0.12; // 0.16-0.28
-            growthPotential = 1.05 + Math.random() * 0.15; // Can grow 1.05x-1.20x (much reduced)
-            growthRate = 0.25 + Math.random() * 0.35; // Slower growth
+            // Medium particles (15%) — gives visual variety
+            baseSize = 0.10 + Math.random() * 0.08; // 0.10-0.18
+            growthPotential = 1.03 + Math.random() * 0.05;
+            growthRate = 0.3 + Math.random() * 0.3;
         } else {
-            // Rare giant blobs (5%) - controlled growth
-            baseSize = 0.20 + Math.random() * 0.18; // 0.20-0.38
-            growthPotential = 1.1 + Math.random() * 0.2; // Can grow 1.1x-1.3x (significantly reduced)
-            growthRate = 0.2 + Math.random() * 0.3; // Slow growth
+            // Occasional larger drops (5%) — visual anchor
+            baseSize = 0.14 + Math.random() * 0.08; // 0.14-0.22
+            growthPotential = 1.05 + Math.random() * 0.1;
+            growthRate = 0.2 + Math.random() * 0.3;
         }
         
-        const geometry = new THREE.SphereGeometry(baseSize, 32, 32); // Higher detail for smooth deformation
+        const segments = baseSize < 0.08 ? 12 : baseSize < 0.14 ? 20 : 32; // Less detail for tiny particles
+        const geometry = new THREE.SphereGeometry(baseSize, segments, segments);
         
         // Store original positions for morphing (like main ferrofluid)
         const originalPositions = geometry.attributes.position.array.slice();
@@ -3851,14 +4168,17 @@ createFloatingBlob(spawnPosition, intensity, type) {
             targetPositions: targetPositions,
             currentPositions: currentPositions,
             noiseOffsets: noiseOffsets,
-            velocity: new THREE.Vector3(
-                (Math.random() - 0.5) * 2, // Random horizontal velocity
-                1 + Math.random() * 2,     // Upward velocity with randomness
-                (Math.random() - 0.5) * 2  // Random depth velocity
-            ),
-            acceleration: new THREE.Vector3(0, -0.8, 0), // Gravity
+            velocity: (() => {
+                const meltEjectBoost = 1.0 + (this.meltLevel || 0) * 2.0; // 3x more violent ejection when melted
+                return new THREE.Vector3(
+                    (Math.random() - 0.5) * 1.5 * meltEjectBoost,
+                    (0.5 + Math.random() * 1.2) * meltEjectBoost,
+                    (Math.random() - 0.5) * 1.5 * meltEjectBoost
+                );
+            })(),
+            acceleration: new THREE.Vector3(0, -0.3, 0), // Light gravity — center attraction is primary force
             life: 1.0, // Life starts at 1.0, decreases over time
-            maxLife: 8 + Math.random() * 4, // Live for 8-12 seconds
+            maxLife: 4 + Math.random() * 4, // Live for 4-8 seconds — faster turnover for bubbly feel
             intensity: intensity,
             type: type,            rotationVelocity: new THREE.Vector3(
                 (Math.random() - 0.5) * 0.1, // Increased variation in rotation speed
@@ -3872,7 +4192,7 @@ createFloatingBlob(spawnPosition, intensity, type) {
             growthPotential: growthPotential, // Maximum scale multiplier
             growthRate: growthRate, // How fast it grows
             growthPhase: Math.random() * Math.PI * 2, // Unique growth timing
-            morphIntensity: 0.2 + Math.random() * 0.15, // More controlled morph strength
+            morphIntensity: 0.35 + Math.random() * 0.25, // Higher morph for bubbly deformation
             phaseOffset: Math.random() * Math.PI * 2, // Unique phase for varied deformation
             personalityType: blobPersonality < 0.3 ? 'small' : 
                            blobPersonality < 0.6 ? 'medium' : 
@@ -3925,8 +4245,11 @@ createFloatingBlob(spawnPosition, intensity, type) {
             return;
         }
         
-        // Check if we have space for more blobs (reduce during intense music)
-        const maxBlobsCurrently = totalIntensity > 0.7 ? Math.floor(this.maxFloatingBlobs * 0.6) : this.maxFloatingBlobs;
+        // Check if we have space for more blobs — melt allows more to exist simultaneously
+        const meltBlobMax = 1.0 + (this.meltLevel || 0) * 0.5; // Up to 50% more blobs when melted
+        const maxBlobsCurrently = totalIntensity > 0.7 ?
+            Math.floor(this.maxFloatingBlobs * 0.6 * meltBlobMax) :
+            Math.floor(this.maxFloatingBlobs * meltBlobMax);
         if (this.floatingBlobs.length >= maxBlobsCurrently) {
             if (Math.random() < 0.01) console.log(`Spawn block: max artefacts (${this.floatingBlobs.length}/${maxBlobsCurrently})`);
             return;
@@ -3951,9 +4274,11 @@ createFloatingBlob(spawnPosition, intensity, type) {
             }
             return;
         }        // Higher chance of spawning with higher intensity (or during anomalies)
-        const spawnChance = isAnomalyActive ? 
+        // Melt level dramatically increases spawn rate — more liquid = more droplets flying off
+        const meltSpawnBoost = 1.0 + (this.meltLevel || 0) * 3.0;
+        const spawnChance = isAnomalyActive ?
             0.3 + (this.anomalySystem.intensity || 0.6) * 0.5 : // 30-80% chance during anomalies
-            Math.min((effectiveIntensity - this.blobSpawnThreshold) * 2, 0.4); // Reduced multiplier and max chance
+            Math.min((effectiveIntensity - this.blobSpawnThreshold) * 3 * meltSpawnBoost, 0.85); // Much higher spawn rate when melted
             
         if (Math.random() < 0.05) { // Debug logging
             console.log(`Spawn chance: ${(spawnChance * 100).toFixed(1)}% (intensity: ${effectiveIntensity.toFixed(3)}, anomaly: ${isAnomalyActive})`);
@@ -4225,12 +4550,27 @@ createFloatingBlob(spawnPosition, intensity, type) {
             
             // Apply physics
             blobData.velocity.add(blobData.acceleration.clone().multiplyScalar(deltaTime));
-            
+
             // Upward floating force (counteracts gravity)
             blobData.velocity.y += 0.5 * deltaTime;
-            
-            // Apply air resistance
-            blobData.velocity.multiplyScalar(0.98);
+
+            // === GRAVITATIONAL ATTRACTION TO CENTER ===
+            // Pull particles toward origin — creates swirling/orbiting effect
+            // When melted, much stronger pull — magnetic recongealment like ferrofluid snapping back
+            const meltPullBoost = 1.0 + (this.meltLevel || 0) * 2.5; // Up to 3.5x stronger pull when melted
+            const toCenter = blob.position.clone().negate(); // vector pointing to center
+            const dist = blob.position.length();
+            if (dist > 0.5) {
+                // Attraction strength increases with distance (soft tether)
+                // Inverse-square-ish at distance for that magnetic snap-back feel
+                const attractStrength = 0.6 * Math.min(dist * 0.3, 2.0) * meltPullBoost;
+                toCenter.normalize().multiplyScalar(attractStrength * deltaTime);
+                blobData.velocity.add(toCenter);
+            }
+
+            // Apply air resistance — less damping when melted (more fluid movement)
+            const airResist = 0.96 - (this.meltLevel || 0) * 0.02; // 0.96 → 0.94 when melted
+            blobData.velocity.multiplyScalar(airResist);
               // Update position
             blob.position.add(blobData.velocity.clone().multiplyScalar(deltaTime));
               
@@ -5380,6 +5720,53 @@ for (const bd of blobs) {
         console.log(`// Artefact ripple at:`, localContactPoint, ` // Waves: ${this.mouseInteraction.waves.length}`);
     }
 
+    /**
+     * Voice-driven ripple — injects a synthetic wave as if the user touched the blob.
+     * Call this from outside (e.g. jarvis-connect.js) when voice onset is detected.
+     * @param {number} energy - 0 to 1, how strong the voice impulse is
+     * @param {number} angle - optional angle (radians) for where on the sphere to hit
+     */
+    createVoiceRipple(energy, angle) {
+        if (!this.ferrofluid || !this.mouseInteraction) return;
+        if (energy < 0.02) return;
+
+        const now = performance.now() * 0.001;
+
+        // Rate-limit to prevent spam (allow more frequent voice ripples)
+        if (this.mouseInteraction.waves.length > 0) {
+            const lastWave = this.mouseInteraction.waves[this.mouseInteraction.waves.length - 1];
+            if (now - lastWave.startTime < 0.05) return;
+        }
+
+        // Remove old waves if at max
+        if (this.mouseInteraction.waves.length >= this.mouseInteraction.maxWaves) {
+            this.mouseInteraction.waves.shift();
+        }
+
+        // Pick a point on the blob surface
+        const theta = angle !== undefined ? angle : Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = 1.8; // blob radius
+        const point = new THREE.Vector3(
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi)
+        );
+
+        // Scale wave properties by voice energy
+        const wave = {
+            center: point,
+            startTime: now,
+            amplitude: this.mouseInteraction.waveAmplitude * (0.5 + energy * 2.0),
+            frequency: this.mouseInteraction.waveFrequency * (0.8 + energy * 0.5),
+            decay: this.mouseInteraction.waveDecay * 0.8, // slower decay for voice
+            speed: this.mouseInteraction.waveSpeed * (0.7 + energy * 0.6),
+            phase: Math.random() * Math.PI * 2
+        };
+
+        this.mouseInteraction.waves.push(wave);
+    }
+
     // Apply mouse forces to floating blobs
     applyMouseForceToFloatingBlobs() {
         if (!this.mouseInteraction.intersectedBlob) return;
@@ -5748,6 +6135,80 @@ for (const bd of blobs) {
         this.analyzeAudio();
         
         this.updateAnomalySystem(); // Update anomaly system for idle effects
+
+        // Voice-driven ripples: map audio to the same blob deformation as mouse
+        if (this.bassIntensity !== undefined) {
+            const totalEnergy = (this.bassIntensity || 0) + (this.midIntensity || 0) + (this.highIntensity || 0);
+            // Bass → big slow ripples from below
+            if (this.bassIntensity > 0.08) {
+                this.createVoiceRipple(this.bassIntensity * 0.8, Math.PI * 0.5); // bottom
+            }
+            // Mid → medium ripples from sides, angle drifts with time
+            if (this.midIntensity > 0.06) {
+                this.createVoiceRipple(this.midIntensity * 0.6, performance.now() * 0.001 * 1.3);
+            }
+            // High → fast small ripples from random angles
+            if (this.highIntensity > 0.1) {
+                this.createVoiceRipple(this.highIntensity * 0.5);
+            }
+        }
+
+        // Multi-band TTS deformation: bass→scale, mid→morphIntensity, high→sensitivity, centroid→color
+        if (this._ttsBands) {
+            const b = this._ttsBands;
+            const lerpF = 0.1; // smooth transitions
+
+            // Bass → blob scale pulsing (low freq = body expansion)
+            if (this.ferrofluid && b.bass > 0.01) {
+                const targetScale = 1.0 + b.bass * 0.3;
+                const cs = this.ferrofluid.scale.x;
+                const ns = cs + (targetScale - cs) * lerpF;
+                this.ferrofluid.scale.setScalar(ns);
+                if (this.ferrofluidInner) this.ferrofluidInner.scale.setScalar(ns);
+            } else if (this.ferrofluid && this.ferrofluid.scale.x > 1.001) {
+                // Decay back to 1.0 when silent
+                const cs = this.ferrofluid.scale.x;
+                const ns = cs + (1.0 - cs) * lerpF * 0.5;
+                this.ferrofluid.scale.setScalar(ns);
+                if (this.ferrofluidInner) this.ferrofluidInner.scale.setScalar(ns);
+            }
+
+            // Mid → surface turbulence (morphIntensity)
+            if (b.mid > 0.01) {
+                const baseMorph = this._baseMorphIntensity || this.morphIntensity || 0.5;
+                if (!this._baseMorphIntensity) this._baseMorphIntensity = baseMorph;
+                const targetMorph = baseMorph + b.mid * 1.5;
+                this.morphIntensity = this.morphIntensity + (targetMorph - this.morphIntensity) * lerpF;
+            } else if (this._baseMorphIntensity) {
+                this.morphIntensity = this.morphIntensity + (this._baseMorphIntensity - this.morphIntensity) * lerpF * 0.5;
+            }
+
+            // High → spike intensity (sensitivity)
+            if (b.high > 0.01) {
+                const baseSens = this._baseSensitivity || this.sensitivity || 1.0;
+                if (!this._baseSensitivity) this._baseSensitivity = baseSens;
+                const targetSens = baseSens + b.high * 2.0;
+                this.sensitivity = this.sensitivity + (targetSens - this.sensitivity) * lerpF;
+            } else if (this._baseSensitivity) {
+                this.sensitivity = this.sensitivity + (this._baseSensitivity - this.sensitivity) * lerpF * 0.5;
+            }
+
+            // Spectral centroid → color temperature shift on ferrofluid material
+            if (this.ferrofluid && this.ferrofluid.material && this.ferrofluid.material.color && b.centroid > 0) {
+                // Higher centroid → warmer gold, lower → cooler blue-purple
+                const warmth = b.centroid; // 0 = low/cool, 1 = high/warm
+                const r = 0.05 + warmth * 0.15;  // more red for warm
+                const g = 0.05 + warmth * 0.08;  // slightly more green
+                const bv = 0.08 + (1 - warmth) * 0.12; // more blue for cool
+                this.ferrofluid.material.color.lerp(new THREE.Color(r, g, bv), lerpF * 0.3);
+            }
+
+            // Zero out bands if energy drops to prevent stale data
+            if (b.energy < 0.01) {
+                this._ttsBands = null;
+            }
+        }
+
         this.updateFerrofluid();
         this.updateFloatingBlobs(deltaTime);
           // Update orbital blob system
@@ -5759,10 +6220,147 @@ for (const bd of blobs) {
             this.shockwaveSystem.update(deltaTime);
         }
 
-        // Update GPU particle shader system (temporarily disabled)
+        // Update GPU particle shader system
         if (this.gpuParticleSystem) {
             this.gpuParticleSystem.update(deltaTime);
-        }          // Update grid cell animation
+        }
+
+        // Update Cosmic Entity system
+        if (this.cosmicEntity) {
+            this.cosmicEntity.update(deltaTime);
+        }
+
+        // Update LiquidBlob marching cubes — melt-driven amorphous shapes
+        if (this.liquidBlob) {
+            this.liquidBlob.update(deltaTime);
+        }
+
+        // Second blob removed — single blob only
+        if (false) {
+            const positions = this.secondBlob.geometry.attributes.position.array;
+            const orig = this._secondOrigPositions;
+            const t2 = this.fluidTime * 0.8 + 7.7;
+            const audioInfluence2 = Math.max(0.15, this.bassIntensity + this.midIntensity + this.highIntensity);
+            const melt = this.meltLevel || 0;
+            const meltBoost = 1.0 + melt * 2.5;
+            const meltSpeedBoost = 1.0 + melt * 1.5;
+
+            // Generate dynamic blob centers with different timing
+            const blobCenters2 = this.generateDynamicBlobCenters(t2);
+
+            // Phase 1: Calculate TARGET positions (same as main blob's approach)
+            for (let i = 0; i < this._secondVertexCount; i++) {
+                const ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
+                const ox = orig[ix], oy = orig[iy], oz = orig[iz];
+                const len = Math.sqrt(ox*ox + oy*oy + oz*oz) || 1;
+                const nx = ox/len, ny = oy/len, nz = oz/len;
+                const no = this._secondNoiseOffsets[i];
+                const vertexPos = new THREE.Vector3(ox, oy, oz);
+
+                // Base organic churning
+                const baseNoise = this.noise3D(
+                    ox + t2 * no.speed * meltSpeedBoost,
+                    oy + t2 * no.speed * 0.8 * meltSpeedBoost,
+                    oz + t2 * no.speed * 1.2 * meltSpeedBoost
+                ) * 0.5 * meltBoost;
+
+                // Dynamic blob center influence
+                let blobInfluence = 0;
+                for (const blob of blobCenters2) {
+                    const dx = vertexPos.x - blob.position.x;
+                    const dy = vertexPos.y - blob.position.y;
+                    const dz = vertexPos.z - blob.position.z;
+                    const distSq = dx*dx + dy*dy + dz*dz;
+                    const radSq = blob.radius * blob.radius;
+                    if (distSq < radSq * 4) {
+                        const dist = Math.sqrt(distSq);
+                        const influence = Math.exp(-(dist / blob.radius) * (dist / blob.radius));
+                        blobInfluence += influence * blob.intensity * blob.strength;
+                    }
+                }
+
+                // Flow direction
+                const flowMag = (0.08 + melt * 0.25) * audioInfluence2;
+                const flowDir = new THREE.Vector3(
+                    this.noise3D(ox * 0.1 + t2 * 0.35, oy * 0.1, oz * 0.1),
+                    this.noise3D(ox * 0.1, oy * 0.1 + t2 * 0.25, oz * 0.1),
+                    this.noise3D(ox * 0.1, oy * 0.1, oz * 0.1 + t2 * 0.4)
+                ).normalize().multiplyScalar(flowMag);
+
+                const finalNormal = new THREE.Vector3(nx, ny, nz).add(flowDir).normalize();
+                const totalDisp = baseNoise + blobInfluence;
+
+                // Write to TARGET (not directly to positions)
+                this._secondTargetPositions[ix] = ox + finalNormal.x * totalDisp;
+                this._secondTargetPositions[iy] = oy + finalNormal.y * totalDisp;
+                this._secondTargetPositions[iz] = oz + finalNormal.z * totalDisp;
+            }
+
+            // Phase 2: Smooth interpolation — SAME damping as main blob
+            for (let i = 0; i < positions.length; i += 3) {
+                let dampingFactor;
+                if (this.isPlaying && audioInfluence2 > 0.15) {
+                    dampingFactor = (0.12 + audioInfluence2 * 0.08) * (1.0 + melt * 1.5);
+                } else {
+                    dampingFactor = 0.06 * (1.0 + melt * 0.5);
+                }
+
+                this._secondCurrentPositions[i] += (this._secondTargetPositions[i] - this._secondCurrentPositions[i]) * dampingFactor;
+                this._secondCurrentPositions[i+1] += (this._secondTargetPositions[i+1] - this._secondCurrentPositions[i+1]) * dampingFactor;
+                this._secondCurrentPositions[i+2] += (this._secondTargetPositions[i+2] - this._secondCurrentPositions[i+2]) * dampingFactor;
+
+                positions[i] = this._secondCurrentPositions[i];
+                positions[i+1] = this._secondCurrentPositions[i+1];
+                positions[i+2] = this._secondCurrentPositions[i+2];
+            }
+
+            this.secondBlob.geometry.attributes.position.needsUpdate = true;
+            this.secondBlob.geometry.computeVertexNormals();
+
+            // Anchored at center, tilted at fixed angle, slow independent rotation
+            this.secondBlob.position.set(0, 0, 0);
+            this.secondBlob.rotation.x = Math.PI * 0.6;
+            this.secondBlob.rotation.z = Math.PI * 0.35;
+            this.secondBlob.rotation.y += 0.004;
+
+            if (this.secondBlobInner) {
+                this.secondBlobInner.position.set(0, 0, 0);
+                this.secondBlobInner.rotation.copy(this.secondBlob.rotation);
+            }
+
+            // ═══ TENDRIL BRIDGE — disabled, blobs share same anchor ═══
+            if (false && this._tendrilMesh && orbitDistance > 1.5) {
+                this._tendrilMesh.visible = true;
+
+                // Update curve control points
+                const p1 = new THREE.Vector3(0, 0, 0); // Main blob center
+                const p4 = this.secondBlob.position.clone();
+                const mid = p1.clone().add(p4).multiplyScalar(0.5);
+                // Curve bows outward with noise for organic feel
+                const bowX = this.noise3D(t2 * 0.5, 0, 0) * orbitDistance * 0.2;
+                const bowY = this.noise3D(0, t2 * 0.4, 0) * orbitDistance * 0.15;
+                const p2 = p1.clone().lerp(mid, 0.35).add(new THREE.Vector3(bowX, bowY, 0));
+                const p3 = mid.clone().lerp(p4, 0.35).add(new THREE.Vector3(-bowX, -bowY, 0));
+
+                this._tendrilCurve.points[0].copy(p1);
+                this._tendrilCurve.points[1].copy(p2);
+                this._tendrilCurve.points[2].copy(p3);
+                this._tendrilCurve.points[3].copy(p4);
+
+                // Rebuild tube geometry with thickness that thins as blobs separate
+                const thickness = Math.max(0.05, 0.8 - orbitDistance * 0.06);
+                this._tendrilMesh.geometry.dispose();
+                this._tendrilMesh.geometry = new THREE.TubeGeometry(this._tendrilCurve, 20, thickness, 8, false);
+            } else if (this._tendrilMesh) {
+                this._tendrilMesh.visible = false; // Hidden when merged
+            }
+        }
+
+        // Atmosphere + lightning disabled — needs proper implementation
+        // this._updateAtmosphereLayer(deltaTime, now);
+        // this._updateLightningLayer(deltaTime, now);
+
+          // Update grid cell animation
         if (this.gridCellAnimator) {
             this.gridCellAnimator.update(
                 now,
@@ -7081,15 +7679,80 @@ for (const bd of blobs) {
             event.preventDefault();
             window.debugEncodingControls.toggle();
         }
-        
 
-        
+
+
         if (event.ctrlKey && event.key === 'r') {
             event.preventDefault();
             window.debugEncodingControls.clear();
         }
+
+        // Toggle Cosmic Entity mode with 'C' key
+        if (event.key === 'c' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            if (window.visualizer && window.visualizer.cosmicEntity) {
+                const isActive = window.visualizer.cosmicEntity.toggle();
+
+                // Hide/show ferrofluid based on mode
+                if (window.visualizer.ferrofluid) {
+                    window.visualizer.ferrofluid.visible = !isActive;
+                }
+                if (window.visualizer.ferrofluidInner) {
+                    window.visualizer.ferrofluidInner.visible = !isActive;
+                }
+
+                console.log(isActive ? '⚡ COSMIC ENTITY MODE' : '🔮 FERROFLUID MODE');
+                // Sync checkbox
+                const cb = document.getElementById('cosmic-enabled');
+                if (cb) cb.checked = isActive;
+            }
+        }
+
     });
-    
+
+    // ─── Cosmic Entity UI Controls ───
+    setTimeout(() => {
+        const v = window.visualizer;
+        if (!v || !v.cosmicEntity) return;
+        const ce = v.cosmicEntity;
+
+        const bind = (id, param, isCheckbox) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener(isCheckbox ? 'change' : 'input', () => {
+                const val = isCheckbox ? el.checked : parseFloat(el.value);
+                ce.setParam(param, val);
+            });
+        };
+
+        // Enable toggle
+        const enableCb = document.getElementById('cosmic-enabled');
+        if (enableCb) {
+            enableCb.addEventListener('change', () => {
+                if (enableCb.checked) ce.activate();
+                else ce.deactivate();
+            });
+        }
+
+        bind('cosmic-size', 'particleBaseSize', false);
+        bind('cosmic-opacity', 'particleOpacity', false);
+        bind('cosmic-glow', 'particleGlow', false);
+        bind('cosmic-spread', 'cloudMaxRadius', false);
+        bind('cosmic-turbulence', 'turbulence', false);
+        bind('cosmic-speed', 'speed', false);
+        bind('cosmic-viscosity', 'viscosity', false);
+        bind('cosmic-flicker', 'flickerEnabled', true);
+        bind('cosmic-flicker-speed', 'flickerSpeed', false);
+        bind('cosmic-flicker-intensity', 'flickerIntensity', false);
+        bind('cosmic-trails', 'trailsEnabled', true);
+        bind('cosmic-trail-length', 'trailLength', false);
+        bind('cosmic-surface-attach', 'surfaceAttach', true);
+        bind('cosmic-attach-strength', 'surfaceAttachStrength', false);
+        bind('cosmic-vibration', 'surfaceVibration', false);
+        bind('cosmic-arcs', 'arcsEnabled', true);
+        bind('cosmic-glow-size', 'glowSize', false);
+        bind('cosmic-haze-size', 'hazeSize', false);
+    }, 2000);
+
     // Enhanced addEncodedLine to respect settings
     function addEncodedLineConditional(text) {
         if (window.debugEncodingSettings.enabled) {
@@ -7234,13 +7897,15 @@ for (const bd of blobs) {
                 return;
             }
             
-            // Close panel if clicking outside of it
-            const rect = uiPanel.getBoundingClientRect();
-            const clickX = event.clientX;
-            const clickY = event.clientY;
-            
-            if (clickX < rect.left || clickX > rect.right || clickY < rect.top || clickY > rect.bottom) {
-                closeUIPanel();
+            // Close panel if clicking outside of it (only when NOT in iframe)
+            if (window === window.top) {
+                const rect = uiPanel.getBoundingClientRect();
+                const clickX = event.clientX;
+                const clickY = event.clientY;
+
+                if (clickX < rect.left || clickX > rect.right || clickY < rect.top || clickY > rect.bottom) {
+                    closeUIPanel();
+                }
             }
         }
     });
@@ -7328,18 +7993,38 @@ for (const bd of blobs) {
     
     // Update panel state on window resize to handle responsive breakpoints
     function updatePanelState() {
-        const isMobile = window.innerWidth <= 768;
-        if (!isMobile && uiPanelOpen) {
-            // Reset to CSS hover behavior on desktop
-            uiPanel.style.right = '';
-            uiPanelOpen = false;
-        }
+        // No longer reset on desktop — keep click-to-pin behavior everywhere
+        // (CSS hover doesn't work when embedded in an iframe with parent elements on top)
     }
-    
+
     window.addEventListener('resize', updatePanelState);
-    
+
     // Initialize panel state
     updatePanelState();
+
+    // Listen for parent page messages (when embedded in JARVIS V2 iframe)
+    window.addEventListener('message', (event) => {
+        if (event.data === 'toggle-settings') toggleUIPanel();
+        if (event.data === 'open-settings') openUIPanel();
+        if (event.data === 'close-settings') closeUIPanel();
+
+        // Multi-band TTS audio data from parent JARVIS V2 page
+        if (event.data && event.data.type === 'tts-bands') {
+            if (window.visualizer) {
+                window.visualizer._ttsBands = {
+                    bass: event.data.bass || 0,
+                    mid: event.data.mid || 0,
+                    high: event.data.high || 0,
+                    energy: event.data.energy || 0,
+                    centroid: event.data.centroid || 0
+                };
+            }
+        }
+    });
+
+    // Expose toggle for parent page access via contentWindow
+    window.toggleSettingsPanel = toggleUIPanel;
+    window.isSettingsPanelOpen = () => uiPanelOpen;
 })();
 
 // Initialize the visualizer when the page loads

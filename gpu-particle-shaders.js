@@ -131,17 +131,24 @@ class BlobShaderSystem {
 
                     uniform float time;
 
+                    // Noise function must be declared outside main() in GLSL
+                    float noise(vec3 p) {
+                        return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+                    }
+
                     void main() {
                         vec3 baseColor = vec3(0.1, 0.1, 0.1);
 
-                        // Procedural texture generation
-                        float noise(vec3 p) {
-                            return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
-                        }
-
                         // Generate seamless noise pattern
                         float pattern = noise(vWorldPosition * 0.5 + time * 0.1);
+
+                        // Fresnel-based rim lighting for metallic ferrofluid look
+                        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+                        float fresnel = pow(1.0 - max(dot(vNormal, viewDir), 0.0), 3.0);
+                        vec3 rimColor = vec3(0.05, 0.08, 0.12); // subtle cool blue rim
+
                         vec3 finalColor = mix(baseColor, vec3(0.0), pattern);
+                        finalColor += rimColor * fresnel;
 
                         gl_FragColor = vec4(finalColor, 1.0);
                     }
