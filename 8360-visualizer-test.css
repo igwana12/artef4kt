@@ -1,0 +1,72 @@
+/* 8360 DESIGN INSPIRATION - GLOWING CYAN AESTHETIC */
+/* Inspired by: https://domenicobrz.github.io/webgl/projects/experiment1/ */
+
+/* Dark background with cyan glow */
+body {
+    background: #000000 !important;
+    background-image: radial-gradient(circle at center, rgba(0, 255, 255, 0.1), transparent) !important;
+}
+
+/* Cyan glowing header */
+#header h1 {
+    color: #00ffff !important;
+    text-shadow: 0 0 10px #00ffff, 0 0 20px rgba(0, 255, 255, 0.5) !important;
+}
+
+/* Cyan glowing buttons */
+button {
+    background: rgba(0, 255, 255, 0.1) !important;
+    color: #00ffff !important;
+    border: 1px solid rgba(0, 255, 255, 0.3) !important;
+    box-shadow: 0 0 5px rgba(0, 255, 255, 0.2) !important;
+}
+
+button:hover {
+    background: rgba(0, 255, 255, 0.2) !important;
+    box-shadow: 0 0 10px rgba(0, 255, 255, 0.4) !important;
+}
+
+/* Cyan glowing sliders */
+input[type="range"] {
+    background: rgba(0, 255, 255, 0.1) !important;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    background: #00ffff !important;
+    box-shadow: 0 0 5px #00ffff !important;
+}
+
+/* Cyan glowing checkboxes */
+input[type="checkbox"]:checked {
+    background: #00ffff !important;
+    border-color: rgba(0, 255, 255, 0.5) !important;
+}
+
+/* Cyan glowing text inputs */
+input[type="text"] {
+    background: rgba(0, ألف إضافي للترجمة) !important;
+    color: #00ffff !important;
+    border: 1px solid rgba(0, 255, 255, 0.3) !important;
+}
+
+/* Cyan glowing panel sections */
+.control-section {
+    background: rgba(10, 10, 10, 0.8) !important;
+    border: 1px solid rgba(0, 255, 255, 0.2) !important;
+    box-shadow: 0 0 5px rgba(0, 255, 255, 0.1) !important;
+}
+
+/* Update test marker to show design inspiration */
+body::after {
+    content: "8360 DESIGN INSPIRATION";
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 255, 255, 0.2);
+    color: #00ffff;
+    padding: 5px 10px;
+    font-size: 14px;
+    z-index: 10000;
+    border-radius: 5px;
+    border: 1px solid rgba(0, 255, 255, 0.3);
+}

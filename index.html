@@ -30,7 +30,8 @@
     <meta name="theme-color" content="#000000">
     
     <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=9999">
+    <link rel="stylesheet" href="8360-test.css?v=9999">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -555,9 +556,108 @@
                             </div>
                         </div>
                     </div>
-                </div>                
+                </div>
 
-                
+                <!-- Cosmic Entity Controls -->
+                <div class="control-section" id="cosmic-controls">
+                    <div class="section-name">⚡ Cosmic Entity (C)</div>
+
+                    <div class="control-group checkbox-control">
+                        <input type="checkbox" id="cosmic-enabled">
+                        <label for="cosmic-enabled">Enabled</label>
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Particle Size</label>
+                        <input type="range" id="cosmic-size" min="0.02" max="0.25" step="0.01" value="0.10">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Opacity</label>
+                        <input type="range" id="cosmic-opacity" min="0.1" max="1.0" step="0.05" value="0.9">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Glow</label>
+                        <input type="range" id="cosmic-glow" min="0.0" max="1.0" step="0.05" value="0.92">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Cloud Spread</label>
+                        <input type="range" id="cosmic-spread" min="0.5" max="8.0" step="0.1" value="3.5">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Turbulence</label>
+                        <input type="range" id="cosmic-turbulence" min="0.0" max="2.0" step="0.05" value="0.4">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Speed</label>
+                        <input type="range" id="cosmic-speed" min="0.1" max="3.0" step="0.1" value="1.0">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Viscosity</label>
+                        <input type="range" id="cosmic-viscosity" min="0.80" max="0.99" step="0.01" value="0.92">
+                    </div>
+
+                    <div class="control-group checkbox-control">
+                        <input type="checkbox" id="cosmic-flicker" checked>
+                        <label for="cosmic-flicker">Flicker</label>
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Flicker Speed</label>
+                        <input type="range" id="cosmic-flicker-speed" min="1.0" max="20.0" step="0.5" value="8.0">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Flicker Intensity</label>
+                        <input type="range" id="cosmic-flicker-intensity" min="0.0" max="1.0" step="0.05" value="0.4">
+                    </div>
+
+                    <div class="control-group checkbox-control">
+                        <input type="checkbox" id="cosmic-trails" checked>
+                        <label for="cosmic-trails">Trails</label>
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Trail Length</label>
+                        <input type="range" id="cosmic-trail-length" min="0.0" max="0.99" step="0.01" value="0.85">
+                    </div>
+
+                    <div class="control-group checkbox-control">
+                        <input type="checkbox" id="cosmic-surface-attach">
+                        <label for="cosmic-surface-attach">Surface Attach</label>
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Attach Strength</label>
+                        <input type="range" id="cosmic-attach-strength" min="0.05" max="1.0" step="0.05" value="0.3">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Surface Vibration</label>
+                        <input type="range" id="cosmic-vibration" min="0.0" max="0.15" step="0.005" value="0.03">
+                    </div>
+
+                    <div class="control-group checkbox-control">
+                        <input type="checkbox" id="cosmic-arcs" checked>
+                        <label for="cosmic-arcs">Electric Arcs</label>
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Glow Aura Size</label>
+                        <input type="range" id="cosmic-glow-size" min="0.0" max="10.0" step="0.5" value="4.0">
+                    </div>
+
+                    <div class="control-group slider-control">
+                        <label>Haze Size</label>
+                        <input type="range" id="cosmic-haze-size" min="0.0" max="15.0" step="0.5" value="9.0">
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -636,14 +736,25 @@
     </div>      
     <script src="three.min.js"></script>
     <script src="color-harmonizer.js"></script>
-    <script src="grid-cells.js"></script>
+    <script src="grid-cells.js?v=13"></script>
     <script src="orbital-blobs.js"></script>
-    <script src="shockwave-system.js"></script>    
+    <script src="emotional-ring-system.js?v=9999"></script>
+    <script src="shockwave-system.js?v=13"></script>
     <script src="performance-monitor.js"></script>
     <script src="gpu-particle-shaders.js"></script>
     <script src="effect-composer.js"></script>
     <script src="filmic-tone-system.js"></script>
-    <script src="script.js"></script>
+    <script src="thinking-mesh-v4.js?v=1"></script>
+    <script src="cosmic-entity.js?v=1"></script>
+    <script src="liquid-blob.js?v=13"></script>
+    <script src="reading-panels.js?v=1"></script>
+    <script src="hexagram-detail-panel.js?v=1"></script>
+    <script src="astro-wheel-panel.js?v=1"></script>
+    <script src="knowledge-graph-panel.js?v=1"></script>
+    <script src="wolfram-panel.js?v=1"></script>
+    <script src="mapbox-panel.js?v=1"></script>
+    <script src="script.js?v=24"></script>
+    <script src="jarvis-connect.js?v=14"></script>
     
     <!-- Tooltip for track progress bar -->
     <div id="segment-tooltip" style="display: none;"></div>

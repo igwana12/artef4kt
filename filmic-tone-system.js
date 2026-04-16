@@ -28,7 +28,7 @@ class FilmicToneSystem {
         
         // Settings (enabled by default for cinematic look)
         this.settings = {
-            enabled: true, // Enabled for cinematic color grading
+            enabled: false, // Disabled by default — enable via Settings panel when desired
             
             // Tone Mapping
             toneMapping: 'linear', // 'linear', 'aces', 'reinhard', 'uncharted2'

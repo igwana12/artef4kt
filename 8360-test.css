@@ -1,0 +1,60 @@
+/* 8360 TEST CSS - IMMEDIATE VISIBLE CHANGES */
+/* This makes 8360 look completely different from 8350 */
+
+/* 1. RED BACKGROUND */
+body {
+    background: linear-gradient(45deg, #ff0000, #cc0000) !important;
+}
+
+/* 2. GREEN GLOWING HEADER */
+#header h1 {
+    color: #00ff00 !important;
+    font-size: 48px !important;
+    font-weight: 900 !important;
+    text-shadow: 0 0 20px #00ff00, 0 0 40px #00ff00 !important;
+}
+
+/* 3. BLUE BUTTONS */
+button {
+    background: #0000ff !important;
+    color: #ffffff !important;
+    border: 3px solid #00ffff !important;
+    box-shadow: 0 0 10px #0000ff !important;
+}
+
+/* 4. YELLOW SLIDERS */
+input[type="range"] {
+    background: #ffff00 !important;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    background: #ff00ff !important;
+    box-shadow: 0 0 10px #ff00ff !important;
+}
+
+/* 5. ORANGE CHECKBOXES */
+input[type="checkbox"]:checked {
+    background: #ff9900 !important;
+    border-color: #ff6600 !important;
+}
+
+/* 6. PURPLE TEXT INPUTS */
+input[type="text"] {
+    background: #9900ff !important;
+    color: #ffffff !important;
+    border: 2px solid #ff00ff !important;
+}
+
+/* 7. VISIBLE TEST MARKER */
+#container::before {
+    content: "8360 TEST VERSION";
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    color: #ffffff;
+    background: #000000;
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    z-index: 10000;
+}

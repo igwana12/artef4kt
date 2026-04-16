@@ -230,7 +230,8 @@ class ShockwaveSystem {
         ring.material = material; // Store reference for cleanup
         // Use LineLoop instead of Line to automatically close the ring
         ring.mesh = new THREE.LineLoop(geometry, material);
-        
+        ring.mesh.renderOrder = 5; // Render AFTER blob (renderOrder 0) so depth test occludes
+
         // Add to scene
         this.visualizer.scene.add(ring.mesh);
     }    updateShockwaves(deltaTime) {

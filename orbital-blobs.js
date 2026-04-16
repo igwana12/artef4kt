@@ -22,19 +22,19 @@ class OrbitalBlobSystem {
         
         // Orbital system configuration
         this.config = {
-            maxOrbitalBlobs: 4,           // Maximum number of orbital blobs
-            spawnCooldown: 3000,          // 3 seconds between spawns
-            baseOrbitRadius: 6.0,         // Base orbit radius from main blob
-            radiusVariation: 2.0,         // ±2.0 variation in orbit radius
+            maxOrbitalBlobs: 10,          // More orbital blobs for richer liquid feel
+            spawnCooldown: 1500,          // Faster spawning (was 3000)
+            baseOrbitRadius: 3.2,         // Tight orbit — hugging the ferrofluid sphere
+            radiusVariation: 1.0,         // ±1.0 variation — stays close
             orbitSpeed: {
-                min: 0.3,                 // Minimum orbit speed multiplier
-                max: 0.8                  // Maximum orbit speed multiplier
+                min: 0.4,                 // Slightly faster minimum
+                max: 1.0                  // Faster maximum for more dynamic orbits
             },
-            baseLifespan: 25,             // Base lifespan in seconds
-            lifespanVariation: 10,        // ±10 seconds variation
+            baseLifespan: 20,             // Shorter lifespan so there's more turnover
+            lifespanVariation: 8,         // ±8 seconds variation
             blobSize: {
-                min: 0.15,                // Minimum blob size
-                max: 0.35                 // Maximum blob size
+                min: 0.08,                // Smaller — satellites not planets
+                max: 0.22                 // Smaller max — tight companions
             }
         };
         
@@ -63,8 +63,8 @@ class OrbitalBlobSystem {
      * Initialize the orbital blob system with starting blobs
      */
     initializeOrbitalBlobs() {
-        // Start with 2 orbital blobs
-        for (let i = 0; i < 2; i++) {
+        // Start with 4 orbital blobs for richer initial presence
+        for (let i = 0; i < 4; i++) {
             setTimeout(() => {
                 this.spawnOrbitalBlob();
             }, i * 1000); // Stagger initial spawns by 1 second
@@ -105,6 +105,10 @@ class OrbitalBlobSystem {
         
         // Create the blob geometry and material
         const geometry = new THREE.SphereGeometry(blobSize, 44, 24);
+        // Pick a glow color — cycles through deity-inspired palette
+        const glowPalette = [0x7c3aed, 0x00cc88, 0xdaa520, 0x4a90d9, 0xff3366, 0xa78bfa];
+        const glowColor = glowPalette[this.orbitalBlobs.length % glowPalette.length];
+
         const material = new THREE.MeshPhysicalMaterial({
             color: 0x111111,
             metalness: 1.0,
@@ -112,7 +116,9 @@ class OrbitalBlobSystem {
             reflectivity: 0.3,
             clearcoat: 0.4,
             clearcoatRoughness: 1.3,
-            envMapIntensity: 1.2
+            envMapIntensity: 1.2,
+            emissive: glowColor,
+            emissiveIntensity: 0.15
         });
         
         const blob = new THREE.Mesh(geometry, material);
@@ -347,9 +353,12 @@ class OrbitalBlobSystem {
                                    this.visualizer.midIntensity + 
                                    this.visualizer.highIntensity;
         
-        // Create acceleration multiplier based on music intensity
-        // Base speed: 1.0, can accelerate up to 2.5x during intense music
-        const musicAcceleration = 1.0 + (totalMusicInfluence * 1.5);
+        // Melt level from the main visualizer — makes orbits more chaotic
+        const melt = this.visualizer.meltLevel || 0;
+
+        // Create acceleration multiplier based on music intensity + melt
+        // Base speed: 1.0, can accelerate up to 2.5x during intense music, 4x when melted
+        const musicAcceleration = 1.0 + (totalMusicInfluence * 1.5) + (melt * 1.5);
         const acceleratedSpeed = orbitalData.orbitSpeed * musicAcceleration;
         
         // Update orbit angle based on accelerated speed
@@ -362,8 +371,9 @@ class OrbitalBlobSystem {
         const spikingIntensity = highFreqInfluence + midFreqBoost;
         
         // Create radius expansion: base radius can expand up to 1.8x during intense spiking
-        const radiusExpansionMultiplier = 1.0 + (spikingIntensity * 0.8);
-        const currentRadius = orbitalData.baseOrbitRadius * radiusExpansionMultiplier;
+        // But when melted, blobs orbit closer — they're part of the liquid mass
+        const radiusExpansionMultiplier = 1.0 + (spikingIntensity * 0.8) - (melt * 0.3);
+        const currentRadius = orbitalData.baseOrbitRadius * Math.max(0.5, radiusExpansionMultiplier);
         
         // Smooth the radius changes to avoid jarring jumps
         if (!orbitalData.smoothedRadius) {

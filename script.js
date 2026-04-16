@@ -422,13 +422,23 @@ class FerrofluidVisualizer {
         
         // Initialize orbital blob system
         this.orbitalBlobSystem = new OrbitalBlobSystem(this);        
+        // Initialize emotional ring system
+        // Emotional ring system disabled — Niko requested removal of orbiting blue lines
+        // this.emotionalRingSystem = new EmotionalRingSystem(this);
+        this.emotionalRingSystem = null;
 
         // Initialize shockwave system
         this.shockwaveSystem = new ShockwaveSystem(this);
 
-        // Initialize Cosmic Entity system (Claude's face)
-        this.cosmicEntity = new CosmicEntitySystem(this);
-        console.log('⚡ Cosmic Entity ready — press C to toggle');
+        // Initialize JARVIS Thinking Mesh v3 with PointCloudMorph
+        this.thinkingMesh = new ThinkingMeshV3(this.scene, {
+            enabled: true,
+            morphSpeed: 1.2,
+            colorHue: 180, // cyan-blue
+            autoMorph: true,
+            morphInterval: 6.0
+        });
+        console.log('🧠 JARVIS Thinking Mesh v3 ready — PointCloudMorph active');
 
         // Initialize LiquidBlob marching cubes system — activates at high melt for amorphous shapes
         if (typeof LiquidBlob !== 'undefined') {
@@ -451,7 +461,10 @@ class FerrofluidVisualizer {
 
         // Initialize blob shader system for enhanced GPU-accelerated rendering
         try {
-            this.gpuParticleSystem = new BlobShaderSystem(this);
+            // GPU shader system disabled — custom shaders dull the MeshPhysicalMaterial clearcoat shine
+            // Re-enable once shaders match the original material's metalness/clearcoat look
+            // this.gpuParticleSystem = new BlobShaderSystem(this);
+            this.gpuParticleSystem = null;
             console.log('Artefact Shader System initialized successfully');
         } catch (error) {
             console.error('Failed to init Artefact Shader System:', error);
@@ -5417,23 +5430,28 @@ for (const bd of blobs) {
                 }
             }
         };
-          // Mouse event listeners
+          // Mouse event listeners — skip when interacting with UI panel controls
+        const _isUIClick = (e) => {
+            const ui = document.getElementById('ui');
+            return ui && ui.contains(e.target);
+        };
         document.addEventListener('mousedown', (e) => {
+            if (_isUIClick(e)) return; // Don't hijack panel control clicks
             this.mousePressed = true;
             this.mouse.prevX = e.clientX;
             this.mouse.prevY = e.clientY;
             document.body.style.cursor = 'grabbing';
-            
+
             // Trigger manual override for automatic camera movement
             this.cameraControls.autoMovement.manualOverride = true;
             this.cameraControls.autoMovement.overrideTimeout = performance.now();
         });
-        
+
         document.addEventListener('mouseup', () => {
             this.mousePressed = false;
             document.body.style.cursor = 'default';
         });
-        
+
         document.addEventListener('mousemove', (e) => {
             this.mouse.x = e.clientX;
             this.mouse.y = e.clientY;
@@ -6215,6 +6233,32 @@ for (const bd of blobs) {
         if (this.orbitalBlobSystem) {
             this.orbitalBlobSystem.update(deltaTime);
         }
+
+          // Update emotional ring system
+        if (this.emotionalRingSystem) {
+            // Get audio data for emotional analysis
+            const amplitude = (this.bassIntensity + this.midIntensity + this.highIntensity) / 3;
+            const frequencyDistribution = {
+                bass: this.bassIntensity,
+                mid: this.midIntensity,
+                high: this.highIntensity
+            };
+            
+            // Analyze emotional state from voice/audio
+            const emotionalState = this.emotionalRingSystem.analyzeVoiceInput(
+                amplitude,
+                frequencyDistribution,
+                this.speechCadence || 0
+            );
+            
+            // Update ring system
+            this.emotionalRingSystem.update(
+                emotionalState,
+                amplitude,
+                frequencyDistribution,
+                this.speechCadence || 0
+            );
+        }
           // Update shockwave system
         if (this.shockwaveSystem) {
             this.shockwaveSystem.update(deltaTime);
@@ -6225,9 +6269,13 @@ for (const bd of blobs) {
             this.gpuParticleSystem.update(deltaTime);
         }
 
-        // Update Cosmic Entity system
-        if (this.cosmicEntity) {
-            this.cosmicEntity.update(deltaTime);
+        // Update JARVIS Thinking Mesh v3 system
+        if (this.thinkingMesh) {
+            // Pass audio data for reactivity
+            if (this.analyser && this.frequencyData) {
+                this.thinkingMesh.updateAudioData(this.frequencyData);
+            }
+            this.thinkingMesh.update(deltaTime);
         }
 
         // Update LiquidBlob marching cubes — melt-driven amorphous shapes
@@ -7790,18 +7838,22 @@ for (const bd of blobs) {
     // Function to open UI panel
     function openUIPanel() {
         if (!uiPanelOpen) {
-            // Remove any inline right positioning to let CSS take control
-            uiPanel.style.right = '0';
+            uiPanel.classList.add('pinned');
             uiPanelOpen = true;
+            // Disable canvas pointer events so settings controls are clickable
+            var canvas = document.getElementById('visualizer');
+            if (canvas) canvas.style.pointerEvents = 'none';
         }
     }
-    
+
     // Function to close UI panel
     function closeUIPanel() {
         if (uiPanelOpen) {
-            // Remove inline positioning to let CSS :hover and :focus-within work
-            uiPanel.style.right = '';
+            uiPanel.classList.remove('pinned');
             uiPanelOpen = false;
+            // Restore canvas pointer events
+            var canvas = document.getElementById('visualizer');
+            if (canvas) canvas.style.pointerEvents = 'auto';
         }
     }
     
@@ -7871,6 +7923,10 @@ for (const bd of blobs) {
             event.preventDefault();
             event.stopPropagation();
             closeUIPanel();
+            // Notify parent since this was NOT triggered by parent's toggle
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage('settings-closed', '*');
+            }
             return true;
         }
         return false;
@@ -7896,17 +7952,7 @@ for (const bd of blobs) {
             if (handleCloseClick(event)) {
                 return;
             }
-            
-            // Close panel if clicking outside of it (only when NOT in iframe)
-            if (window === window.top) {
-                const rect = uiPanel.getBoundingClientRect();
-                const clickX = event.clientX;
-                const clickY = event.clientY;
-
-                if (clickX < rect.left || clickX > rect.right || clickY < rect.top || clickY > rect.bottom) {
-                    closeUIPanel();
-                }
-            }
+            // Panel stays open — only closes via close button, toggle, or Escape
         }
     });
       // Add touch event listeners for mobile devices
@@ -7942,14 +7988,7 @@ for (const bd of blobs) {
                     return;
                 }
                 
-                // Close panel if touching outside of it
-                const rect = uiPanel.getBoundingClientRect();
-                const touchX = touch.clientX;
-                const touchY = touch.clientY;
-                
-                if (touchX < rect.left || touchX > rect.right || touchY < rect.top || touchY > rect.bottom) {
-                    closeUIPanel();
-                }
+                // Panel stays open — only closes via close button, toggle, or Escape
             }
         }
     });
@@ -7972,6 +8011,10 @@ for (const bd of blobs) {
                 if (isVisible) {
                     // Force close the panel by removing focus and setting state
                     closeUIPanel();
+                    // Notify parent since this was NOT triggered by parent's toggle
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage('settings-closed', '*');
+                    }
                     
                     // Also remove focus from any focused element within the panel
                     const focusedElement = uiPanel.querySelector(':focus');
@@ -8032,11 +8075,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Small delay to ensure loading screen is visible
     setTimeout(() => {
         window.visualizer = new FerrofluidVisualizer();
-        
+
         // Complete loading and hide loading screen
         setTimeout(() => {
             window.loadingManager.hide();
-        }, 500); // Small delay to show final loading state
+
+            // Auto-load "Neon Vibes" preset as default
+            setTimeout(() => {
+                const dropdown = document.getElementById('settings-dropdown');
+                if (dropdown && window.visualizer) {
+                    dropdown.value = 'neon-vibes';
+                    dropdown.dispatchEvent(new Event('change'));
+                    console.log('[ARTEF4KT] Default preset loaded: Neon Vibes');
+                }
+            }, 500);
+        }, 500);
     }, 100);
 });
 

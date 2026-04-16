@@ -220,7 +220,8 @@ class GridCellAnimator {
         // Determine lifespan based on intensity (more intense = longer lasting)
         const lifespan = this.cellLifespan * (0.8 + totalIntensity * 0.4);
         
-        // Add to scene
+        // Add to scene — renders after blob (renderOrder 0) so depth test occludes
+        wireframeMesh.renderOrder = 5;
         this.scene.add(wireframeMesh);
         
         // Add to active cells
